@@ -5,6 +5,8 @@ This guide walks you through importing accurate real-world landscapes and buildi
 
 Requirements: Blender, BlenderGID addon, Blosm Addon (formerly known as blender-osm)
 
+Credits: I wrote the manual and workflow, ChatGPT wrote the Python Script helper. Wishing you good luck!
+
 ---
 
 ## 🧭 Step 1 — Create the Base Map in BlenderGIS
