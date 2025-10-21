@@ -33,7 +33,7 @@ Start with a fresh Blender project.
 
 3. **Merge DEM Objects**  
    Select the `srtm` object, then select each child (`DEM`, `DEM.001`, etc.).  
-   Press **Ctrl + J** to join them into one object.  (alternatively: click Object -> Join)
+   Press **Ctrl + J** to join them into one object.  (alternatively: In inspector click Apply, or: click Object -> Join if that didnt work. In any case, there should be only one mesh left!)
    Your terrain is now one complete mesh.
 
 4. **Export the Terrain**  
