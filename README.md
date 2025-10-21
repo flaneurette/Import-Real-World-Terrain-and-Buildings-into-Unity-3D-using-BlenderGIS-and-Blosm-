@@ -3,9 +3,9 @@
 
 This guide walks you through importing accurate real-world landscapes and buildings into Unity, using **BlenderGIS**, **Blosm**, and a simple Python script to align buildings perfectly with the terrain.
 
-Requirements: Blender, BlenderGID addon, Blosm Addon (formerly known as blender-osm)
+Requirements: Blender, BlenderGIS addon, Blosm Addon (formerly known as blender-osm)
 
-Credits: I wrote the manual and workflow, ChatGPT wrote the Python Script helper. Wishing you good luck!
+Credits: I wrote the manual and workflow, ChatGPT wrote the Python Script helper. Wishing you good luck, because it's not easy!
 
 ---
 
