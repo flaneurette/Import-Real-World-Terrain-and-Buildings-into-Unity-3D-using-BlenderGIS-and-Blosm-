@@ -37,7 +37,7 @@ Start with a fresh Blender project.
    Your terrain is now one complete mesh.
 
 4. **Export the Terrain**  
-   Go to `File → Export → Wavefront (.OBJ)`  
+   With ONLY the srtm mesh selected, go to `File → Export → Wavefront (.OBJ)`  
    Save it somewhere handy.
 
 5. **Record the Coordinates**  
