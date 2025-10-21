@@ -9,7 +9,7 @@ Credits: I wrote the manual and workflow, ChatGPT wrote the Python Script helper
 
 ---
 
-## Step 1 — Create the Base Map in BlenderGIS
+## Step 1 - Create the Base Map in BlenderGIS
 
 Start with a fresh Blender project.
 
@@ -37,7 +37,7 @@ Start with a fresh Blender project.
    Scroll down to find the coordinates (N, W, E, S).  
    Write them down — you’ll need these for Blosm.
 
-💾 **Save your project** and close it.
+**Save your project** and close it.
 
 ---
 
@@ -111,7 +111,7 @@ Click **Export FBX** - done!
 
 ---
 
-## 🚀 Step 5 - Import into Unity
+## Step 5 - Import into Unity
 
 1. Drag your `.fbx` into Unity’s **Assets** folder.  
 2. Place it in the scene - your terrain and buildings should align perfectly.  
