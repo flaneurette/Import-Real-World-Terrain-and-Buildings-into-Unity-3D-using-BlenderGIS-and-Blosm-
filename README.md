@@ -84,6 +84,7 @@ Now we’ll use a Blender add-on to automatically set all buildings to their cor
 2. **Run the Script**
    - In **Object Mode**, select all your buildings.
    - Go to `Object → Align Buildings to Terrain`
+   - In the box: manually type the name of the elevation object: i.e. srtm, and the object containting all building meshes: i.e. map_3.osm_buildings (no extension! just the names so the script knows what the terrain and the where the buildings are!)
    - The script now adjusts every building’s Z-position to match the terrain beneath it.
 
 > 🪄 **Tip:** The script even includes a configurable *offset*, so you can make buildings “sink” slightly into the terrain for a snug fit.
