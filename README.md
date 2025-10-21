@@ -11,7 +11,7 @@ Credits:
 
 I wrote the manual and workflow
 
-ChatGPT wrote the Python Script helper. 
+ChatGPT wrote the Python Script helper. (Heavylifted the proper Ray tracing for me)
 
 Wishing you good luck, because it's not easy!
 
