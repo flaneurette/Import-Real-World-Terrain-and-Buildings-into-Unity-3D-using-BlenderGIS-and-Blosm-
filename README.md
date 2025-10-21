@@ -42,8 +42,8 @@ Start with a fresh Blender project.
 
 5. **Record the Coordinates**  
    Open `BlenderGIS → Logs`.  
-   Scroll down to find the coordinates (N, W, E, S).  
-   Write them down — you’ll need these for Blosm.
+   Scroll down to find the coordinates (N, W, E, S) in the URL that BlenderGIS fetched.
+   Write them down - you’ll need these for Blosm.
 
 **Save your project** and close it.
 
