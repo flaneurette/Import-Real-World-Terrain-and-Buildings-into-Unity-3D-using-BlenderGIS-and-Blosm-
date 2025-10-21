@@ -1,4 +1,4 @@
-# 🌍 Import Real-World Terrain and Buildings into Unity 3D  
+# Import Real-World Terrain and Buildings into Unity 3D  
 **Using BlenderGIS, Blosm, and a Custom Alignment Script**
 
 This guide walks you through importing accurate real-world landscapes and buildings into Unity, using **BlenderGIS**, **Blosm**, and a simple Python script to align buildings perfectly with the terrain.
@@ -9,7 +9,7 @@ Credits: I wrote the manual and workflow, ChatGPT wrote the Python Script helper
 
 ---
 
-## 🧭 Step 1 — Create the Base Map in BlenderGIS
+## Step 1 — Create the Base Map in BlenderGIS
 
 Start with a fresh Blender project.
 
@@ -41,7 +41,7 @@ Start with a fresh Blender project.
 
 ---
 
-## 🏗 Step 2 — Import the Terrain and Buildings via Blosm
+## Step 2 - Import the Terrain and Buildings via Blosm
 
 Open a **new Blender project**.
 
@@ -67,11 +67,11 @@ Open a **new Blender project**.
    Click the **Import** button.  
    Blosm fetches the OSM data and places it relative to your SRTM mesh.
 
-> 🧩 **Note:** Blosm doesn’t yet perfectly align buildings to the terrain — we’ll fix that next.
+> **Note:** Blosm doesn’t yet perfectly align buildings to the terrain - we’ll fix that next.
 
 ---
 
-## 🧠 Step 3 — Align Buildings to Terrain with a Custom Script
+## Step 3 - Align Buildings to Terrain with a Custom Script
 
 Now we’ll use a Blender add-on to automatically set all buildings to their correct terrain height.
 
@@ -87,11 +87,11 @@ Now we’ll use a Blender add-on to automatically set all buildings to their cor
    - In the box: manually type the name of the elevation object: i.e. srtm, and the object containting all building meshes: i.e. map_3.osm_buildings (no extension! just the names so the script knows what the terrain and the where the buildings are!)
    - The script now adjusts every building’s Z-position to match the terrain beneath it.
 
-> 🪄 **Tip:** The script even includes a configurable *offset*, so you can make buildings “sink” slightly into the terrain for a snug fit.
+>  **Tip:** The script even includes a configurable *offset*, so you can make buildings “sink” slightly into the terrain for a snug fit. (I used -0.5 to have a good offset)
 
 ---
 
-## 🧱 Step 4 — Export to Unity 3D
+##  Step 4 - Export to Unity 3D
 
 Finally, let’s bring it into Unity.
 
@@ -107,19 +107,19 @@ Finally, let’s bring it into Unity.
 | **Geometry → Smoothing** | Face |
 | **Apply Modifiers** | ✅ Checked |
 
-Click **Export FBX** — done!
+Click **Export FBX** - done!
 
 ---
 
-## 🚀 Step 5 — Import into Unity
+## 🚀 Step 5 - Import into Unity
 
 1. Drag your `.fbx` into Unity’s **Assets** folder.  
-2. Place it in the scene — your terrain and buildings should align perfectly.  
+2. Place it in the scene - your terrain and buildings should align perfectly.  
 3. Adjust materials, add textures, and enjoy your realistic 3D map!
 
 ---
 
-## ✅ Summary
+## Summary
 
 You’ve just built a complete **real-world terrain and building pipeline** from BlenderGIS → Blosm → Unity, including:
 - Accurate **SRTM elevation data**  
@@ -129,7 +129,7 @@ You’ve just built a complete **real-world terrain and building pipeline** from
 
 ---
 
-## 💡 Bonus Tips
+## Bonus Tips
 
 - To make the terrain more lightweight, use the **Decimate Modifier** in Blender.  
 - If you want better lighting, bake **Ambient Occlusion** before exporting.  
