@@ -20,7 +20,7 @@ Start with a fresh Blender project.
    Press `Esc` once you’re satisfied with the area.
 
 2. **Get Elevation Data**  
-   Click **Get Elevation (SRTM)**.  
+   Again, in BlenderGIS: click **Get Elevation (SRTM)**.  
    This downloads a terrain mesh with elevation data.
 
 3. **Merge DEM Objects**  
