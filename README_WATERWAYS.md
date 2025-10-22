@@ -28,7 +28,7 @@ Before you start carving, ensure that your data is processed as outlined in the 
      - Select the **SRTM** by name.
      - Select the **Waterway Object** by name.
      - Set the **depth** for both layers (ensure the SRTM layer has enough depth to carve).
-   - Press **Carve** and wait for the process to complete. If you encounter any jagged polygons, it means the operation failed. Simply press `Ctrl + Z` to undo and try again.
+   - Press **Carve** and wait for the process to complete. If you encounter any jagged polygons, it means the operation failed. Simply press `Ctrl + Z` to undo and try again. Note that a few dozen jagged polygons is rather normal, clean this up manually please. However if you see hundreds, then Blender simply made a mistake, run it again.
    
    Your waterway will now be carved into the SRTM mesh!
 
