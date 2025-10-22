@@ -127,6 +127,9 @@ Click **Export FBX** - done!
 
 ---
 
+## Optional Carve deeper waterways!
+Now, if you want to carve out waterways deeper and more realistic, you can do that with the other README. There is a seperate README and script, which you can also run if you want to carve deeper wateryways than the SRTM provides (which is rather shallow as the SRTM lacks bathymetric information)
+
 ## Summary
 
 You’ve just built a complete **real-world terrain and building pipeline** from BlenderGIS → Blosm → Unity, including:
