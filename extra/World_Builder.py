@@ -17,13 +17,14 @@ import math
 from mathutils import Vector, Matrix
 import time
 import json
+import bpy
 from bpy.props import StringProperty, IntProperty, FloatProperty, BoolProperty, CollectionProperty, PointerProperty
 import ctypes
 import sys
 from pathlib import Path
 import gc
 from datetime import datetime
-    
+
 # Global metadata storage
 GLOB_BUILDINGS_META_DATA = []
 GLOB_EXPORT_FOLDER = None
@@ -153,7 +154,18 @@ def print_to_stream(message, stream=None, base_time=None):
         stream.flush()
 
     return {'FINISHED'}
-    
+
+def messagebox_showerror(title, message):
+    """Blender-native replacement for tkinter's messagebox.showerror.
+    Shows a popup in the 3D Viewport and logs the error to the console/log file."""
+    def draw(self, context):
+        self.layout.label(text=str(message), icon='ERROR')
+    try:
+        bpy.context.window_manager.popup_menu(draw, title=str(title), icon='ERROR')
+    except Exception:
+        pass
+    print_to_stream(f"{title}: {message}\n", stream=None, base_time=time.time())
+
 def c(text, color):
     
     if os.name == 'nt' and coloring_failed:
@@ -417,8 +429,8 @@ def get_or_create_pbr_material(base_name, texture_folder, export_folder):
         for file in files:
             
             name_lower = file.lower()
-            #if not name_lower.startswith(base_name.lower()):
-                #continue
+            if not name_lower.startswith(base_name.lower()):
+                continue
             path = os.path.join(texture_folder, file)
             if not os.path.isfile(path):
                 continue
@@ -1324,11 +1336,7 @@ class WINDOWS_AND_DOORS(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        
-        if os.name == 'nt':  # Windows only
-            # Show the Blender console window
-            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 5)
-        
+
         scn = context.scene.pbr_export_settings
         
         # Clear old metadata
@@ -1397,7 +1405,7 @@ class WINDOWS_AND_DOORS(bpy.types.Operator):
             selected = collections
         else:
             print_to_stream("No matching collection found, cannot access first element!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, "A buildings scene collection does not exist!", "Error", 0)
+            messagebox_showerror("Error", "A buildings scene collection does not exist!")
             return {'CANCELLED'}
             
         if not selected:
@@ -1806,7 +1814,7 @@ def create_textures(texture_path,texture_name,obj_tex,export_folder,tex_width,te
        start_time = time.time()
        if is_folder_empty(texture_path):
            print_to_stream(texture_path + "\ folder is empty! please add textures first!", stream = None, base_time = time.time())
-           ctypes.windll.user32.MessageBoxW(0, texture_path + "\ folder is empty! please add textures first!", "Error", 0)
+           messagebox_showerror("Error", texture_path + "\ folder is empty! please add textures first!")
            return {'CANCELLED'}
         
        collections = select_top_level_collection_by_name(texture_name)
@@ -1815,11 +1823,11 @@ def create_textures(texture_path,texture_name,obj_tex,export_folder,tex_width,te
            selected = collections
        else:
            print_to_stream("No matching collection found, cannot access first element!", stream = None, base_time = time.time())
-           ctypes.windll.user32.MessageBoxW(0, "A " + texture_name + " scene collection does not exist!", "Error", 0)
+           messagebox_showerror("Error", "A " + texture_name + " scene collection does not exist!")
            return {'CANCELLED'}
        if not selected:
            print_to_stream("Select " + texture_name + " parent!", stream = None, base_time = time.time())
-           ctypes.windll.user32.MessageBoxW(0, "Select " + texture_name + " parent!", "Error", 0)
+           messagebox_showerror("Error", "Select " + texture_name + " parent!")
            return {'CANCELLED'}
        parent = selected
        all_children = get_all_objects_in_collection(parent)
@@ -1872,7 +1880,7 @@ def create_textures(texture_path,texture_name,obj_tex,export_folder,tex_width,te
         
     else:
         print_to_stream("/" + texture_name + "/ texture folder does not exist!", stream = None, base_time = time.time())
-        ctypes.windll.user32.MessageBoxW(0, "/" + texture_name + "/ texture folder does not exist!", "Error", 0)
+        messagebox_showerror("Error", "/" + texture_name + "/ texture folder does not exist!")
         return {'CANCELLED'} 
 
     return {'FINISHED'}
@@ -1968,14 +1976,14 @@ class EXPORT_DATA(bpy.types.Operator):
             roof_folder = texture_path_roofs
         else:
             print_to_stream("/roofs/ texture folder does not exist!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, "/roofs/ texture folder does not exist!", "Error", 0)
+            messagebox_showerror("Error", "/roofs/ texture folder does not exist!")
             return {'CANCELLED'}
             
         if os.path.exists(texture_path_buildings) and os.path.isdir(texture_path_buildings):
             texture_folder = texture_path_buildings
         else:
             print_to_stream("/buildings/ texture folder does not exist!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, "/buildings/ texture folder does not exist!", "Error", 0)
+            messagebox_showerror("Error", "/buildings/ texture folder does not exist!")
             return {'CANCELLED'}
         
         if os.name == 'nt':
@@ -2247,24 +2255,24 @@ class OBJECT_OT_run_pbr_export(bpy.types.Operator):
             roof_folder = texture_path_roofs
         else:
             print_to_stream("/roofs/ texture folder does not exist!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, "/roofs/ texture folder does not exist!", "Error", 0)
+            messagebox_showerror("Error", "/roofs/ texture folder does not exist!")
             return {'CANCELLED'}
             
         if os.path.exists(texture_path_buildings) and os.path.isdir(texture_path_buildings):
             texture_folder = texture_path_buildings
         else:
             print_to_stream("/buildings/ texture folder does not exist!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, "/buildings/ texture folder does not exist!", "Error", 0)
+            messagebox_showerror("Error", "/buildings/ texture folder does not exist!")
             return {'CANCELLED'}
 
         if is_folder_empty(texture_folder):
             print_to_stream(texture_folder + "/ folder is empty! please add textures first!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, texture_folder + "/ folder is empty! please add textures first!", "Error", 0)
+            messagebox_showerror("Error", texture_folder + "/ folder is empty! please add textures first!")
             return {'CANCELLED'}
  
         if is_folder_empty(roof_folder):
             print_to_stream(roof_folder + "/ folder is empty! please add textures first!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, roof_folder + "/ folder is empty! please add textures first!", "Error", 0)
+            messagebox_showerror("Error", roof_folder + "/ folder is empty! please add textures first!")
             return {'CANCELLED'}
 
         collections = select_top_level_collection_by_name("buildings")
@@ -2272,7 +2280,7 @@ class OBJECT_OT_run_pbr_export(bpy.types.Operator):
             selected = collections
         else:
             print_to_stream("No matching collection found, cannot access first element!", stream = None, base_time = time.time())
-            ctypes.windll.user32.MessageBoxW(0, "A buildings scene collection does not exist!", "Error", 0)
+            messagebox_showerror("Error", "A buildings scene collection does not exist!")
             return {'CANCELLED'}
             
         if not selected:
@@ -2733,7 +2741,7 @@ class WaterCarver(bpy.types.Operator):
 
         parent_collection = select_top_level_collection_by_name("water")
         if not parent_collection:
-            ctypes.windll.user32.MessageBoxW(0, "No water collection found!", "Error", 0)
+            messagebox_showerror("Error", "No water collection found!")
             return {'CANCELLED'}
 
         all_children = get_all_objects_in_collection(parent_collection)
