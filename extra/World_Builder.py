@@ -264,6 +264,17 @@ def console_generate_vegetation():
     bpy.ops.object.greenery()
     print_to_stream(f"Processing console vegetation generation took: {time.time() - start_time:.2f} seconds.\n", stream=None, base_time=time.time())
     return {'FINISHED'}
+
+def console_place_trees():
+    ensure_global_export_folder()
+    global GLOB_EXPORT_FOLDER
+    global GLOB_TEXTURE_FOLDER
+    start_time = time.time()
+    scn = bpy.context.scene
+    settings = scn.pbr_export_settings
+    bpy.ops.object.place_trees()
+    print_to_stream(f"Processing console tree placement took: {time.time() - start_time:.2f} seconds.\n", stream=None, base_time=time.time())
+    return {'FINISHED'}
     
 def console_generate_water():
     ensure_global_export_folder()
@@ -344,6 +355,7 @@ texture_folder="C:\\Users\\Gebruiker\\Desktop\\World Builder\\Textures"
 --process_openings=True    : Generates random windows, doors and vents on each building (and also cuts out mesh openings.)
 --process_roads=True       : Texturizes roads
 --process_vegetation=True  : Texturizes vegetation
+--process_trees=True       : Scatters placeholder trees across forest/park areas
 --process_waterways=True   : Texturizes waterways such as rivers, lakes, etc.
 --process_railways=True    : Texturizes railways
 -----------------------------
@@ -790,6 +802,325 @@ def get_all_objects_in_collection(coll):
     for child_coll in coll.children:  # child collections
         all_objs.extend(get_all_objects_in_collection(child_coll))
     return all_objs
+
+# ===== Tree placement (placeholder trees, real mesh instances) =====
+
+def get_or_create_flat_material(name, color, roughness=0.9):
+    """Simple flat Principled BSDF material, cached by name so re-runs reuse it."""
+    if name in bpy.data.materials:
+        return bpy.data.materials[name]
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = color
+        if "Roughness" in bsdf.inputs:
+            bsdf.inputs["Roughness"].default_value = roughness
+    return mat
+
+def _bmesh_create_cone(bm, cap_ends, cap_tris, segments, r1, r2, depth):
+    """Blender <~3.0 bmesh.ops.create_cone takes diameter1/diameter2; newer
+    versions take radius1/radius2. Try the modern kwargs first, fall back."""
+    try:
+        return bmesh.ops.create_cone(
+            bm, cap_ends=cap_ends, cap_tris=cap_tris, segments=segments,
+            radius1=r1, radius2=r2, depth=depth
+        )
+    except TypeError:
+        return bmesh.ops.create_cone(
+            bm, cap_ends=cap_ends, cap_tris=cap_tris, segments=segments,
+            diameter1=r1 * 2, diameter2=r2 * 2, depth=depth
+        )
+
+def _bmesh_create_icosphere(bm, subdivisions, r):
+    """Same story as _bmesh_create_cone: 'radius' on newer Blender, 'diameter' on older."""
+    try:
+        return bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=r)
+    except TypeError:
+        return bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, diameter=r * 2)
+
+def get_or_create_tree_mesh(variant="cone", trunk_radius=0.15, trunk_height=1.8,
+                             canopy_radius=1.4, canopy_height=3.0, canopy_segments=7):
+    """Builds a small low-poly placeholder tree (trunk + canopy) once and caches
+    it in bpy.data.meshes so every placed tree instance shares the same mesh data."""
+    mesh_name = f"WB_TreeMesh_{variant}"
+    if mesh_name in bpy.data.meshes:
+        return bpy.data.meshes[mesh_name]
+
+    bm = bmesh.new()
+
+    trunk = _bmesh_create_cone(
+        bm, cap_ends=True, cap_tris=False, segments=6,
+        r1=trunk_radius, r2=trunk_radius * 0.75, depth=trunk_height
+    )
+    bmesh.ops.translate(bm, verts=trunk['verts'], vec=(0, 0, trunk_height / 2))
+
+    if variant == "round":
+        canopy = _bmesh_create_icosphere(bm, subdivisions=1, r=canopy_radius)
+        canopy_center_z = trunk_height + canopy_radius * 0.7
+    else:
+        canopy = _bmesh_create_cone(
+            bm, cap_ends=True, cap_tris=False, segments=canopy_segments,
+            r1=canopy_radius, r2=0.0, depth=canopy_height
+        )
+        canopy_center_z = trunk_height + canopy_height / 2
+
+    bmesh.ops.translate(bm, verts=canopy['verts'], vec=(0, 0, canopy_center_z))
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+
+    mesh = bpy.data.meshes.new(mesh_name)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+
+    bark_mat = get_or_create_flat_material("WB_TreeBark", (0.14, 0.09, 0.05, 1.0))
+    leaf_mat = get_or_create_flat_material("WB_TreeLeaves", (0.07, 0.22, 0.08, 1.0))
+    mesh.materials.append(bark_mat)
+    mesh.materials.append(leaf_mat)
+    trunk_top_z = trunk_height * 0.9
+    for poly in mesh.polygons:
+        avg_z = sum(mesh.vertices[v].co.z for v in poly.vertices) / len(poly.vertices)
+        poly.material_index = 0 if avg_z < trunk_top_z else 1
+
+    return mesh
+
+def sample_points_on_mesh(obj, density, rng):
+    """Non-destructively triangulates a copy of obj's mesh (original is left
+    untouched) and area-weight samples world-space points across its faces."""
+    points = []
+    matrix = obj.matrix_world
+    normal_matrix = matrix.to_3x3()
+
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+
+    for tri in bm.faces:
+        verts = tri.verts
+        if len(verts) != 3:
+            continue
+        v0 = matrix @ verts[0].co
+        v1 = matrix @ verts[1].co
+        v2 = matrix @ verts[2].co
+        area = (v1 - v0).cross(v2 - v0).length / 2.0
+        expected = area * density
+        count = int(expected)
+        if rng.random() < (expected - count):
+            count += 1
+        if count <= 0:
+            continue
+        normal = (normal_matrix @ tri.normal).normalized()
+        for _ in range(count):
+            r1 = rng.random()
+            r2 = rng.random()
+            sqrt_r1 = math.sqrt(r1)
+            a = 1 - sqrt_r1
+            b = sqrt_r1 * (1 - r2)
+            c = sqrt_r1 * r2
+            point = v0 * a + v1 * b + v2 * c
+            points.append((point, normal))
+
+    bm.free()
+    return points
+
+def filter_points_by_spacing(points, min_spacing):
+    """Thins out points that fall closer together than min_spacing using a
+    simple spatial hash grid, so trees don't clump unnaturally."""
+    if min_spacing <= 0 or not points:
+        return points
+    cell = min_spacing
+    grid = {}
+    kept = []
+    for point, normal in points:
+        key = (int(point.x // cell), int(point.y // cell))
+        too_close = False
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for other in grid.get((key[0] + dx, key[1] + dy), []):
+                    if (other - point).length < min_spacing:
+                        too_close = True
+                        break
+                if too_close:
+                    break
+            if too_close:
+                break
+        if not too_close:
+            grid.setdefault(key, []).append(point)
+            kept.append((point, normal))
+    return kept
+
+def build_terrain_raycaster(terrain_obj):
+    """Builds a reusable BVH tree (in the terrain's local space) ONCE per scatter
+    run, so per-tree raycasts don't each pay the cost of re-fetching the
+    depsgraph and re-evaluating the terrain object. Returns
+    (bvh, matrix_world, matrix_world_inverted) or None if terrain_obj is None."""
+    if terrain_obj is None:
+        return None
+    try:
+        from mathutils.bvhtree import BVHTree
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        bvh = BVHTree.FromObject(terrain_obj, depsgraph)
+        matrix = terrain_obj.matrix_world.copy()
+        return (bvh, matrix, matrix.inverted())
+    except Exception as e:
+        print_to_stream(f"Could not build terrain raycaster, trees will use the forest mesh's own height: {e}", stream=None, base_time=time.time())
+        return None
+
+def get_ground_z(raycaster, x, y, fallback_z):
+    """Uses a prebuilt terrain raycaster (see build_terrain_raycaster) to find
+    the true ground height at (x, y). Falls back to fallback_z if there's no
+    raycaster or the ray misses (e.g. off the terrain edge)."""
+    if raycaster is None:
+        return fallback_z
+    bvh, matrix, matrix_inv = raycaster
+    ray_origin_local = matrix_inv @ Vector((x, y, 100000.0))
+    ray_dir_local = (matrix_inv.to_3x3() @ Vector((0, 0, -1))).normalized()
+    location, normal, index, distance = bvh.ray_cast(ray_origin_local, ray_dir_local)
+    if location is not None:
+        return (matrix @ location).z
+    return fallback_z
+
+def get_terrain_base_z(terrain_obj):
+    """Returns the lowest world-space Z of terrain_obj's bounding box, used to
+    normalize real-world SRTM elevation (often tens/hundreds of meters above
+    sea level) down to a local ground level of ~0."""
+    if terrain_obj is None:
+        return 0.0
+    try:
+        bbox_world = [terrain_obj.matrix_world @ Vector(corner) for corner in terrain_obj.bound_box]
+        return min(v.z for v in bbox_world)
+    except Exception as e:
+        print_to_stream(f"Could not compute terrain base elevation: {e}", stream=None, base_time=time.time())
+        return 0.0
+
+def get_tree_mesh_sources(names_csv):
+    """Parses a comma-separated string of existing MESH object names already
+    in the scene and returns their mesh data blocks, to be used as tree
+    instances instead of the procedural placeholder geometry. The source
+    objects themselves are hidden from render/viewport (not deleted) once
+    picked up, since every placed tree references their mesh data directly."""
+    sources = []
+    names = []
+    for raw_name in (names_csv or "").split(","):
+        name = raw_name.strip()
+        if not name:
+            continue
+        obj = bpy.data.objects.get(name)
+        if obj is None or obj.type != 'MESH':
+            print_to_stream(f"Tree source object '{name}' not found or not a mesh - skipping.", stream=None, base_time=time.time())
+            continue
+        sources.append(obj.data)
+        names.append(name)
+        obj.hide_render = True
+        obj.hide_set(True)
+    return sources, names
+
+def scatter_trees_in_collection(area_name_substr, density, min_scale, max_scale,
+                                 min_spacing, seed, tree_variants=("cone", "round"),
+                                 terrain_obj_name="", tree_source_objects="",
+                                 auto_normalize_z=True, z_offset=0.0):
+    """Finds the first top-level collection whose name contains area_name_substr
+    (e.g. 'forest', 'vegetation'), then scatters tree objects across every MESH
+    object found inside it, weighted by face area. If tree_source_objects names
+    real tree mesh(es) already in the scene, those are instanced instead of the
+    procedural placeholders. If terrain_obj_name matches an object in the scene,
+    tree height is taken from a raycast onto that terrain instead of trusting
+    the forest mesh's own (possibly modifier-driven) Z. If auto_normalize_z is
+    True, the terrain's own lowest point is subtracted so trees land relative
+    to local ground level (~0) instead of real-world SRTM elevation; z_offset
+    is then added on top for any further manual nudging."""
+    rng = random.Random(seed)
+
+    coll = select_top_level_collection_by_name(area_name_substr)
+    if not coll:
+        print_to_stream(f"No collection matching '{area_name_substr}' found - skipping tree placement.", stream=None, base_time=time.time())
+        return 0
+
+    all_children = get_all_objects_in_collection(coll)
+
+    # Same curve->mesh safety net used before texturing, so curve-based
+    # OSM areas don't silently get skipped here either.
+    curve_objs = [obj for obj in all_children if obj.type == 'CURVE']
+    if curve_objs:
+        bpy.ops.object.select_all(action='DESELECT')
+        for obj in curve_objs:
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+        try:
+            bpy.ops.object.convert(target='MESH')
+        except Exception as e:
+            print_to_stream(f"Curve to mesh conversion failed before tree placement: {e}", stream=None, base_time=time.time())
+        all_children = get_all_objects_in_collection(coll)
+
+    meshes = [obj for obj in all_children if obj.type == 'MESH']
+    if not meshes:
+        print_to_stream(f"No MESH area found under '{area_name_substr}' - nothing to scatter trees on.", stream=None, base_time=time.time())
+        return 0
+
+    custom_meshes, custom_names = get_tree_mesh_sources(tree_source_objects)
+    if custom_meshes:
+        tree_meshes = custom_meshes
+        tree_variants = custom_names
+        print_to_stream(f"Using {len(custom_meshes)} custom tree source object(s): {', '.join(custom_names)}", stream=None, base_time=time.time())
+    else:
+        tree_meshes = [get_or_create_tree_mesh(v) for v in tree_variants]
+
+    terrain_obj = bpy.data.objects.get(terrain_obj_name) if terrain_obj_name else None
+    if terrain_obj_name and terrain_obj is None:
+        print_to_stream(f"Terrain object '{terrain_obj_name}' not found - trees will use the forest mesh's own height.", stream=None, base_time=time.time())
+
+    terrain_base_z = get_terrain_base_z(terrain_obj) if (terrain_obj and auto_normalize_z) else 0.0
+    if terrain_obj and auto_normalize_z:
+        print_to_stream(f"Normalizing tree height: subtracting terrain base elevation {terrain_base_z:.2f}", stream=None, base_time=time.time())
+
+    raycaster = build_terrain_raycaster(terrain_obj)
+
+    trees_collection_name = "WB_Trees"
+    if trees_collection_name in bpy.data.collections:
+        trees_collection = bpy.data.collections[trees_collection_name]
+    else:
+        trees_collection = bpy.data.collections.new(trees_collection_name)
+        bpy.context.scene.collection.children.link(trees_collection)
+
+    placed = 0
+    z_min, z_max = None, None
+    sample_time = 0.0
+    place_time = 0.0
+    raw_point_total = 0
+    for obj in meshes:
+        t0 = time.time()
+        raw_points = sample_points_on_mesh(obj, density, rng)
+        points = filter_points_by_spacing(raw_points, min_spacing)
+        sample_time += time.time() - t0
+        raw_point_total += len(raw_points)
+
+        t0 = time.time()
+        for point, normal in points:
+            variant_idx = rng.randrange(len(tree_variants))
+            tree_data = tree_meshes[variant_idx]
+            tree_obj = bpy.data.objects.new(f"Tree_{tree_variants[variant_idx]}_{placed:05d}", tree_data)
+
+            raw_z = get_ground_z(raycaster, point.x, point.y, point.z)
+            z = raw_z - terrain_base_z + z_offset
+            tree_obj.location = (point.x, point.y, z)
+            z_min = z if z_min is None else min(z_min, z)
+            z_max = z if z_max is None else max(z_max, z)
+
+            tree_obj.rotation_euler[2] = rng.uniform(0, math.pi * 2)
+            scale = rng.uniform(min_scale, max_scale)
+            tree_obj.scale = (scale, scale, scale * rng.uniform(0.9, 1.1))
+            tree_obj["WB_TreeVariant"] = tree_variants[variant_idx]
+            trees_collection.objects.link(tree_obj)
+            placed += 1
+        place_time += time.time() - t0
+
+    if placed:
+        print_to_stream(f"Tree Z range placed: {z_min:.2f} to {z_max:.2f}", stream=None, base_time=time.time())
+    print_to_stream(f"Sampled {raw_point_total} candidate points ({sample_time:.2f}s) before spacing filter, placed {placed} objects ({place_time:.2f}s, incl. raycasting).", stream=None, base_time=time.time())
+    if raw_point_total > 20000:
+        print_to_stream(f"Note: {raw_point_total} candidate points is a lot for a single area - if this feels slow, try lowering Tree Density or raising Min Tree Spacing.", stream=None, base_time=time.time())
+    print_to_stream(f"Placed {placed} trees across {len(meshes)} area(s) matching '{area_name_substr}'.\n", stream=None, base_time=time.time())
+    return placed
 
 def create_cube_verts_faces(width, depth, height):
     # Half sizes
@@ -1831,6 +2162,22 @@ def create_textures(texture_path,texture_name,obj_tex,export_folder,tex_width,te
            return {'CANCELLED'}
        parent = selected
        all_children = get_all_objects_in_collection(parent)
+
+       # Auto-convert any CURVE objects (common for OSM road/path imports) into MESH
+       # so they aren't silently skipped by the MESH-only filter below.
+       curve_objs = [obj for obj in all_children if obj.type == 'CURVE']
+       if curve_objs:
+           print_to_stream(f"Converting {len(curve_objs)} curve object(s) to mesh in {texture_name}...", stream = None, base_time = time.time())
+           bpy.ops.object.select_all(action='DESELECT')
+           for obj in curve_objs:
+               obj.select_set(True)
+               bpy.context.view_layer.objects.active = obj
+           try:
+               bpy.ops.object.convert(target='MESH')
+           except Exception as e:
+               print_to_stream(f"Curve to mesh conversion failed: {e}", stream = None, base_time = time.time())
+           all_children = get_all_objects_in_collection(parent)  # re-fetch after conversion
+
        meshes = [obj for obj in all_children if obj.type == 'MESH']
        if not meshes:
            print_to_stream("No MESH children found!, textures might not have been applied everywhere!", stream = None, base_time = time.time())
@@ -2452,7 +2799,63 @@ class GREENERY(bpy.types.Operator):
         print_to_stream(f"Processing took: {time.time() - start_time:.2f} seconds")  
         
         return {'FINISHED'}
-        
+
+class TREES(bpy.types.Operator):
+
+    bl_idname = "object.place_trees"
+    bl_label = "Place trees"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+
+        if os.name.lower() == 'nt':
+            ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 5)
+
+        start_time = time.time()
+        scn = context.scene.pbr_export_settings
+
+        print_to_stream("=" * 60 + "\n", stream = None, base_time = time.time())
+        print_to_stream("Starting subroutine: tree placement\n", stream = None, base_time = time.time())
+        print_to_stream("=" * 60 + "\n", stream = None, base_time = time.time())
+
+        total_placed = 0
+        total_placed += scatter_trees_in_collection(
+            "forest",
+            scn.tree_density,
+            scn.tree_min_scale,
+            scn.tree_max_scale,
+            scn.tree_min_spacing,
+            scn.tree_seed,
+            terrain_obj_name=scn.tree_terrain_obj_name,
+            tree_source_objects=scn.tree_source_objects,
+            auto_normalize_z=scn.tree_auto_normalize_z,
+            z_offset=scn.tree_z_offset
+        )
+
+        if scn.tree_also_vegetation:
+            total_placed += scatter_trees_in_collection(
+                "vegetation",
+                scn.tree_density * 0.3,
+                scn.tree_min_scale,
+                scn.tree_max_scale,
+                scn.tree_min_spacing,
+                scn.tree_seed + 1,
+                terrain_obj_name=scn.tree_terrain_obj_name,
+                tree_source_objects=scn.tree_source_objects,
+                auto_normalize_z=scn.tree_auto_normalize_z,
+                z_offset=scn.tree_z_offset
+            )
+
+        print_to_stream("=" * 60 + "\n", stream = None, base_time = time.time())
+        print_to_stream(f"Subroutine completed. Placed {total_placed} trees total.", stream = None, base_time = time.time())
+        print_to_stream("Note: Blender may take a moment to update the viewport. Wait until the cursor stops spinning before continuing.", stream = None, base_time = time.time())
+        print_to_stream("=" * 60 + "\n", stream = None, base_time = time.time())
+        print_to_stream(f"Processing took: {time.time() - start_time:.2f} seconds")
+
+        cleanup_blender_memory()
+
+        return {'FINISHED'}
+
 class ROADS(bpy.types.Operator):
     
     bl_idname = "object.roads"
@@ -2522,7 +2925,7 @@ class ROADS(bpy.types.Operator):
         create_textures(texture_path_roads_service,"roads_service",roads_service_tex,export_folder,tex_width,tex_height)
         create_textures(texture_path_roads_tertiary,"roads_tertiary",roads_tertiary_tex,export_folder,tex_width,tex_height)
         create_textures(texture_path_roads_track,"roads_track",roads_track_tex,export_folder,tex_width,tex_height)
-        create_textures(texture_path_roads_unclasified,"roads_unclasified",roads_unclasified_tex,export_folder,tex_width,tex_height)
+        # create_textures(texture_path_roads_unclasified,"roads_unclasified",roads_unclasified_tex,export_folder,tex_width,tex_height)
         create_textures(texture_path_areas_pedestrian,"areas_pedestrian",areas_pedestrian_tex,export_folder,tex_width,tex_height)
         print_to_stream("=" * 60 + "\n", stream = None, base_time = time.time())
         print_to_stream("Subroutine completed. Please proceed with the next step once ready.", stream = None, base_time = time.time())
@@ -2613,7 +3016,7 @@ class GROUND(bpy.types.Operator):
         print_to_stream("Starting subroutine: ground/terrain generation", stream = None, base_time = time.time())
         print_to_stream("=" * 60 + "\n", stream = None, base_time = time.time())
         
-        create_textures(texture_path_ground,"srtm",ground_tex,export_folder,tex_width,tex_height)
+        create_textures(texture_path_ground,"EXPORT_GOOGLE_SAT_WM",ground_tex,export_folder,tex_width,tex_height)
 
         print_to_stream("=" * 60 + "\n", stream = None, base_time = time.time())
         print_to_stream("Subroutine completed. Please proceed with the next step once ready.", stream = None, base_time = time.time())
@@ -2882,8 +3285,47 @@ class PBR_Exporter_Props(bpy.types.PropertyGroup):
     window_height: bpy.props.FloatProperty(name="Window Height", default=1.5)
     water_obj_name: bpy.props.StringProperty(name="Water Object Name", default="map_3.osm_water")
     water_obj_depth: bpy.props.FloatProperty(name="Depth", default=25.0, min=0.1, max=100.0)
-    water_obj_srtm_name: bpy.props.StringProperty(name="SRTM Object Name", default="srtm")
+    water_obj_srtm_name: bpy.props.StringProperty(name="SRTM Object Name", default="EXPORT_GOOGLE_SAT_WM")
     water_obj_srtm_depth: bpy.props.FloatProperty(name="Srtm Depth", default=50.0, min=0.1, max=500.0)
+
+    tree_density: bpy.props.FloatProperty(
+        name="Tree Density",
+        description="Approx. trees placed per square meter of forest/park area",
+        default=0.02, min=0.0, max=1.0
+    )
+    tree_min_scale: bpy.props.FloatProperty(name="Min Tree Scale", default=0.8, min=0.1, max=10.0)
+    tree_max_scale: bpy.props.FloatProperty(name="Max Tree Scale", default=1.4, min=0.1, max=10.0)
+    tree_min_spacing: bpy.props.FloatProperty(
+        name="Min Tree Spacing",
+        description="Minimum distance in meters between placed trees",
+        default=1.5, min=0.0, max=50.0
+    )
+    tree_seed: bpy.props.IntProperty(name="Tree Random Seed", default=0)
+    tree_also_vegetation: bpy.props.BoolProperty(
+        name="Also scatter on vegetation areas",
+        description="In addition to 'forest' areas, also place a lighter scattering of trees on 'vegetation' areas",
+        default=False
+    )
+    tree_terrain_obj_name: bpy.props.StringProperty(
+        name="Terrain Object",
+        description="Name of the terrain/SRTM object to raycast tree height against. Leave empty to use the forest mesh's own Z.",
+        default="EXPORT_GOOGLE_SAT_WM"
+    )
+    tree_source_objects: bpy.props.StringProperty(
+        name="Tree Source Objects",
+        description="Comma-separated names of existing MESH objects in the scene to instance as trees (e.g. imported tree models). Leave empty to use the built-in placeholder trees.",
+        default=""
+    )
+    tree_auto_normalize_z: bpy.props.BoolProperty(
+        name="Normalize to terrain base",
+        description="Subtract the terrain object's lowest point from every tree's height, so trees sit relative to local ground level (~0) instead of real-world SRTM elevation",
+        default=True
+    )
+    tree_z_offset: bpy.props.FloatProperty(
+        name="Tree Z Offset",
+        description="Extra height added to every placed tree after normalization, for manual fine-tuning",
+        default=13.0
+    )
     
 class OBJECT_PT_pbr_exporter_panel(bpy.types.Panel):
     
@@ -2907,6 +3349,18 @@ class OBJECT_PT_pbr_exporter_panel(bpy.types.Panel):
         layout.operator("object.run_pbr_export", text="1. Texturize walls & roofs")
         layout.label(text="Greenery textures:")
         layout.operator("object.greenery", text="2. Texturize greenery") 
+        layout.label(text="Trees:")
+        layout.prop(scn, "tree_density")
+        layout.prop(scn, "tree_min_scale")
+        layout.prop(scn, "tree_max_scale")
+        layout.prop(scn, "tree_min_spacing")
+        layout.prop(scn, "tree_seed")
+        layout.prop(scn, "tree_also_vegetation")
+        layout.prop(scn, "tree_terrain_obj_name")
+        layout.prop(scn, "tree_source_objects")
+        layout.prop(scn, "tree_auto_normalize_z")
+        layout.prop(scn, "tree_z_offset")
+        layout.operator("object.place_trees", text="2b. Place trees")
         layout.label(text="Waterways:")
         layout.prop(scn, "water_obj_name")
         layout.prop(scn, "water_obj_depth")
@@ -2940,6 +3394,7 @@ classes = [
     PBR_Exporter_Props,
     OBJECT_OT_run_pbr_export,
     GREENERY,
+    TREES,
     WATERWAYS,
     ROADS,
     RAILWAYS,
@@ -3024,6 +3479,7 @@ if __name__ == "__main__":
             "process_openings": console_generate_openings,
             "process_roads": console_generate_roads,
             "process_vegetation": console_generate_vegetation,
+            "process_trees": console_place_trees,
             "process_waterways": console_generate_water,
             "process_railways": console_generate_railways,
             "process_terrain": console_generate_terrain
@@ -3054,6 +3510,7 @@ if __name__ == "__main__":
                 run_stage("openings (windows/doors/vents)", console_generate_openings)
                 run_stage("roads", console_generate_roads)
                 run_stage("vegetation", console_generate_vegetation)
+                run_stage("trees", console_place_trees)
                 run_stage("waterways", console_generate_water)
                 run_stage("railways", console_generate_railways)
                 run_stage("terrain/ground", console_generate_terrain)
